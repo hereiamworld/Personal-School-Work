@@ -1,0 +1,30 @@
+float height_scale = .8;
+					float minLayers = 8.0;
+					float maxLayers = 32.0;
+					float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), viewDir))); 
+					float layerDepth = 1.0 / numLayers;
+					float currentLayerDepth = 0.0;
+					
+					vec2 P = viewDir.xy / viewDir.z * height_scale;
+					vec2 deltaTexCoords = P / numLayers;
+					
+					vec2 currentTexCoords = texCoords;
+					float currentDepthMapValue = texture2D(displacmentTexture, currentTexCoords).r;
+   
+					for (float i=0.0;i<33.0;i++){
+						if(currentLayerDepth < currentDepthMapValue){
+							currentTexCoords -= deltaTexCoords;
+							currentDepthMapValue = texture2D(displacmentTexture, currentTexCoords).r;
+							currentLayerDepth += layerDepth;	
+						}
+					}
+					
+					vec2 prevTexCoords = currentTexCoords + deltaTexCoords;
+					
+					float afterDepth = currentDepthMapValue - currentLayerDepth;
+					float beforeDepth = texture2D(displacmentTexture,prevTexCoords).r - currentLayerDepth + layerDepth;
+					
+					float weight = afterDepth / (afterDepth - beforeDepth);
+					vec2 finalTexCoords = vec2(prevTexCoords[0] * weight + currentTexCoords[0] * (1.0 - weight),prevTexCoords[1] * weight + currentTexCoords[1] * (1.0 - weight));
+   
+					return finalTexCoords;

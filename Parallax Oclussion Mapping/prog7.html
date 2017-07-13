@@ -1,0 +1,184 @@
+<!-- Alexandre Knijn
+	aknijn1@lsu.edu-->
+	<html>
+		<head>
+			<script type="text/javascript" src="webgl-utils.js"></script>
+			<script type="text/javascript" src="webgl-debug.js"></script>
+			<script type="text/javascript" src="cuon-utils.js">	</script>
+			<script type="text/javascript" src="cuon-matrix.js"></script>
+			<script type="text/javascript" src="prog7.js">		</script>
+			<script type="text/javascript" src="square.js">		</script>
+			<script type="text/javascript" src="chest.js">		</script>
+		</head>
+		<body onload="init()">
+			<script id="vertexShader" type="x-shader/x-vertex">
+				precision mediump float;
+
+				uniform mat4 projectionMatrix;
+				uniform mat4 viewMatrix;
+				uniform mat4 modelMatrix;
+				uniform vec4 lightPosition;
+
+				attribute vec4 vertexPosition;
+				attribute vec3 vertexNormal;
+				attribute vec2 vertexTexCoord;
+				attribute vec3 vertexTangent;
+				attribute vec3 vertexBitangent;
+
+				varying vec2 fragmentTexCoord;
+				varying vec3 fragmentPosition;
+				varying vec3 fragmentTangentPosition;
+				varying vec3 fragmentTangentView;
+				varying vec3 fragmentTangentLight;
+				
+				
+				void main(){
+					mat4 modelViewMatrix = viewMatrix * modelMatrix;
+					vec3 viewPosition = vec3(modelViewMatrix * vertexPosition);
+					
+					vec3 T = normalize(mat3(modelMatrix) * vertexTangent);
+					vec3 B = normalize(mat3(modelMatrix) * vertexBitangent);
+					vec3 N = normalize(mat3(modelMatrix) * vertexNormal);
+					mat3 transTBN = (mat3(vec3(T[0],B[0],N[0]),vec3(T[1],B[1],N[1]),vec3(T[2],B[2],N[2])));
+					
+					fragmentPosition = vec3(modelMatrix*vertexPosition);
+					fragmentTexCoord = vertexTexCoord;
+					fragmentTangentLight = transTBN * (vec3(lightPosition));
+					fragmentTangentView  = transTBN * viewPosition;
+					fragmentTangentPosition = transTBN * fragmentPosition ;
+					
+					gl_Position = projectionMatrix * modelViewMatrix * vertexPosition;
+				}
+			</script>
+			<script id="lightingFragmentShader" type="x-shader/x-fragment">
+				precision mediump float;
+				
+				varying vec2 fragmentTexCoord;
+				varying vec3 fragmentPosition;
+				varying vec3 fragmentTangentPosition;
+				varying vec3 fragmentTangentView;
+				varying vec3 fragmentTangentLight;
+				
+				
+				uniform vec3 lightColor;
+				uniform sampler2D modelTexture;
+				uniform sampler2D normalTexture;
+				uniform sampler2D displacmentTexture;
+				
+				vec2 ParallaxMapping(vec2 TexCoords, vec3 viewDir);
+				
+				void main() {
+					vec3 viewDir = normalize (fragmentTangentView - fragmentTangentPosition);
+					vec2 texCoords = ParallaxMapping(fragmentTexCoord, viewDir);
+					
+					//if(texCoords.x > 1.0 || texCoords.y > 1.0 || texCoords.x < -1.0 || texCoords.y < -0.9){
+					//	discard;
+					//}
+				
+					vec3 modelColor = texture2D(modelTexture,texCoords).rgb;
+					
+					vec3 normal = texture2D(normalTexture,texCoords).rgb;
+					normal = normalize(normal * 2.0 - 1.0);
+					
+					vec3 ambient = 0.1 * modelColor;
+					
+					vec3 lightDir = normalize(fragmentTangentLight - fragmentTangentPosition);
+					float diff = max(dot(lightDir, normal), 0.0);
+					vec3 diffuse = diff * modelColor;
+
+					vec3 reflectDir = reflect(-lightDir, normal);
+					vec3 halfwayDir = normalize(lightDir + viewDir);  
+					float spec = pow(max(dot(normal, halfwayDir), 0.0), 32.0);
+					vec3 specular = vec3(0.2) * spec;
+	
+					gl_FragColor = vec4(ambient + diffuse + specular,1.0);
+				}
+				
+				vec2 ParallaxMapping(vec2 texCoords, vec3 viewDir){ 
+					const float height_scale = 0.2;
+					const float minLayers = 8.0;
+					const float maxLayers = 100.0;
+					float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), viewDir))); 
+					float layerDepth = 1.0 / numLayers;
+					float currentLayerDepth = 0.0;
+					
+					vec2 P = viewDir.xy / viewDir.z * height_scale;
+					vec2 deltaTexCoords = vec2(P[0] / numLayers,P[1] / numLayers);
+					
+					vec2 currentTexCoords = texCoords;
+					float currentDepthMapValue = texture2D(displacmentTexture, currentTexCoords)[0];
+   
+					for (float i=0.0;i<maxLayers;i++){
+						if (currentLayerDepth < currentDepthMapValue) {
+							currentTexCoords = vec2(currentTexCoords[0] - deltaTexCoords[0],currentTexCoords[1] - deltaTexCoords[1]);
+							currentDepthMapValue = texture2D(displacmentTexture, currentTexCoords)[0];
+							currentLayerDepth = currentLayerDepth + layerDepth;	
+						}
+					}
+					
+					vec2 prevTexCoords = vec2(currentTexCoords[0] + deltaTexCoords[0],currentTexCoords[1] + deltaTexCoords[1]);
+					
+					float afterDepth = currentDepthMapValue - currentLayerDepth;
+					float beforeDepth = texture2D(displacmentTexture,prevTexCoords)[0] - currentLayerDepth + layerDepth;
+					
+					float weight = afterDepth / (afterDepth - beforeDepth);
+					vec2 finalTexCoords = vec2((prevTexCoords[0] * weight) + (currentTexCoords[0] * (1.0 - weight)),(prevTexCoords[1] * weight) + (currentTexCoords[1] * (1.0 - weight)));
+   
+					return finalTexCoords;
+				} 
+			</script>
+			<canvas id="webgl" width="500px" height="500px">
+				This content requires <a href="http://get.webgl.org/">WebGL</a>.
+			</canvas>
+			<form>
+					<label>Light X  </label>
+					<input type="range" oninput="slider()" id="xSlider" min="-5.0" max="5.0" value="5.0" step="0.1">
+					<span id ="xValue">5.0</span>
+				<br>
+					<label>Light Y</label>
+					<input type="range" oninput="slider()" id="ySlider" min="-5.0" max="5.0" value="5.0" step="0.1">
+					<span id ="yValue">5.0</span>
+				<br>
+					<label>Light Z </label>
+					<input type="range" oninput="slider()" id="zSlider" min="-5.0" max="5.0" value="5.0" step="0.1">
+					<span id ="zValue">5.0</span>
+				<br>
+			</form>
+			<p> Alexandre Knijn</p>
+			<p>For my final project I implemented parallax mapping to be used alongside normal mapping. <br>
+			Parallax mapping is used to attempt to better imitate the depth of an object facets. <br>
+			I used  <a href="https://learnopengl.com/#!Advanced-Lighting/Parallax-Mapping">this site</a> to learn how to implement parallax mapping and 3 images that help to demonstrate the technique.<br> 
+			To demonstrate this, I choose one of the simplest objects, a square, to test this technique on. <br>
+			I then used a texture, normal map and displacement map to render a brick wall on the square. </p>
+			
+			<p>Parallax mapping creates a fake sense of depth even in an object with few vertices. <br>
+			Mathematically this can be done approximately by taking the point where the view position would see (A)<br>
+			and shortening the vector between A and the view to the height of A. This is done with the displacement map <br>
+			which is then used to sample a different point of the texture map creating a fake depth.</p>
+			
+			<p>To implement the wall, the first thing that I needed to do was find the tangent and bitangent of the square's triangles.<br>
+			To do this I found two edges of every triangle. Then the U and V components of the edges were found. <br>
+			I then use these components multiplied by the edge components to find the tangent and the bitangent for each triangle. <br>
+			I then used the tangent, bitangent, and normal vectors for each triangle to make the TBN matrix.<br> 
+			I then transposed this matrix to be able to multiply the light position, view position and fragment position<br>
+			to put these vectors into tangent space. </p>
+			
+			<p>With these tangent space vectors passed to the fragment shader and the three texture maps loaded the fragment shader starts. <br>
+			First it gets the direction of the view and then calling the parallax mapping function. <br>
+			The parallax mapping function takes the displacement map and stores it in height. <br>
+			It then calculates the depth of each point on the depth point and subtract this from the texture coordinates which are then returned to main. <br>
+			These new texture coordinates are used for both the texture map and the normal map calculations causing the parallax mapping effect. <br>
+			The fragment shader then creates standard lighting effects with the normal calculations but with the new texture coordinates.</p>
+			
+			<p>I then expanded the parallax mapping with a technique called steep parallax mapping. <br>
+			This technique takes multiple depth samples to better estimate the depth. This technique checks whether or not each subsequent depth sample taken from the displacement map. <br>
+			Everything stays the same for this implementation except the parallax mapping function in the fragment shader. <br>
+			The fragment shader separates the change in the texture coordinates into separate equal divisions and then subtract one only when the next layer is deeper than the layer before it.<br>
+			When the next layer is no longer deeper than the subsequent layer then the new texture coordinates are returned.<br>
+			The last technique added called parallax occlusion mapping averages the last layer with the previous layer making <br>
+			an approximation that is more likely to be accurate to the true depth of the object.</p>
+			<p></p>
+			<p></p>
+			<p></p>
+		</body>
+	</html>
